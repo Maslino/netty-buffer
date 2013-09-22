@@ -290,6 +290,14 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         return memoryOccupation;
     }
 
+    /**
+     *  for test
+     * @return  chunk size
+     */
+    public int chunkSize() {
+        return DEFAULT_PAGE_SIZE << DEFAULT_MAX_ORDER;
+    }
+
     @Override
     public boolean isDirectBufferPooled() {
         return directArenas != null;

@@ -20,6 +20,7 @@ import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
 
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicInteger;
 
 abstract class PoolArena<T> {
 
@@ -31,7 +32,7 @@ abstract class PoolArena<T> {
     private final int chunkSize;
     private final int subpageOverflowMask;
 
-    private int arenaSizeInMB;
+    private final AtomicInteger arenaSizeInMB;
 
     private final PoolSubpage<T>[] tinySubpagePools;
     private final PoolSubpage<T>[] smallSubpagePools;
@@ -53,7 +54,7 @@ abstract class PoolArena<T> {
         this.pageShifts = pageShifts;
         this.chunkSize = chunkSize;
         subpageOverflowMask = ~(pageSize - 1);
-        this.arenaSizeInMB = 0;
+        this.arenaSizeInMB = new AtomicInteger(0);
 
         tinySubpagePools = newSubpagePoolArray(512 >>> 4);
         for (int i = 0; i < tinySubpagePools.length; i ++) {
@@ -144,7 +145,7 @@ abstract class PoolArena<T> {
 
         // Add a new chunk.
         PoolChunk<T> c = newChunk(pageSize, maxOrder, pageShifts, chunkSize);
-        arenaSizeInMB += chunkSize >> 20;
+        arenaSizeInMB.addAndGet(chunkSize >>> 20);
         long handle = c.allocate(normCapacity);
         assert handle > 0;
         c.initBuf(buf, handle, reqCapacity);
@@ -153,11 +154,11 @@ abstract class PoolArena<T> {
 
     private void allocateHuge(PooledByteBuf<T> buf, int reqCapacity) {
         buf.initUnpooled(newUnpooledChunk(reqCapacity), reqCapacity);
-        arenaSizeInMB += reqCapacity >> 20;
+        arenaSizeInMB.addAndGet(chunkSize >>> 20);
     }
 
     public int getArenaSizeInMB() {
-        return arenaSizeInMB;
+        return arenaSizeInMB.get();
     }
 
     synchronized void free(PoolChunk<T> chunk, long handle) {
