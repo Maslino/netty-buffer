@@ -18,11 +18,13 @@ package io.netty.buffer;
 
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
-import io.netty.util.internal.SystemPropertyUtil;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class PooledByteBufAllocator extends AbstractByteBufAllocator {
@@ -38,8 +40,20 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
     private static final int MIN_PAGE_SIZE = 4096;
     private static final int MAX_CHUNK_SIZE = (int) (((long) Integer.MAX_VALUE + 1) / 2);
 
+    private static final int DEFAULT_MAX_MEMORY_MB;    // in MB, default to 1024
+
     static {
-        int defaultPageSize = SystemPropertyUtil.getInt("io.netty.allocator.pageSize", 8192);
+        Properties allocatorProperties = new Properties();
+        try {
+            InputStream in = PooledByteBufAllocator.class.getResourceAsStream("/allocator.properties");
+            allocatorProperties.load(in);
+        } catch (IOException ex) {
+            logger.warn("allocator.properties file not found.");
+        }
+
+        System.out.println(allocatorProperties);
+
+        int defaultPageSize = Integer.valueOf(allocatorProperties.getProperty("pageSize", "8192"));
         Throwable pageSizeFallbackCause = null;
         try {
             validateAndCalculatePageShifts(defaultPageSize);
@@ -49,7 +63,7 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         }
         DEFAULT_PAGE_SIZE = defaultPageSize;
 
-        int defaultMaxOrder = SystemPropertyUtil.getInt("io.netty.allocator.maxOrder", 11);
+        int defaultMaxOrder = Integer.valueOf(allocatorProperties.getProperty("maxOrder", "11"));
         Throwable maxOrderFallbackCause = null;
         try {
             validateAndCalculateChunkSize(DEFAULT_PAGE_SIZE, defaultMaxOrder);
@@ -63,33 +77,52 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         // Assuming each arena has 3 chunks, the pool should not consume more than 50% of max memory.
         final Runtime runtime = Runtime.getRuntime();
         final int defaultChunkSize = DEFAULT_PAGE_SIZE << DEFAULT_MAX_ORDER;
-        DEFAULT_NUM_HEAP_ARENA = Math.max(0,
-                SystemPropertyUtil.getInt(
-                        "io.netty.allocator.numHeapArenas",
-                        (int) Math.min(
-                                runtime.availableProcessors(),
-                                Runtime.getRuntime().maxMemory() / defaultChunkSize / 2 / 3)));
-        DEFAULT_NUM_DIRECT_ARENA = Math.max(0,
-                SystemPropertyUtil.getInt(
-                        "io.netty.allocator.numDirectArenas",
-                        (int) Math.min(
-                                runtime.availableProcessors(),
-                                PlatformDependent.maxDirectMemory() / defaultChunkSize / 2 / 3)));
+        int numHeapArenas = Integer.valueOf(allocatorProperties.getProperty(
+            "numHeapArenas",
+            String.valueOf(Math.min(
+                runtime.availableProcessors(),
+                Runtime.getRuntime().maxMemory() / defaultChunkSize / 2 / 3)
+            )));
+        DEFAULT_NUM_HEAP_ARENA = Math.max(0, numHeapArenas);
+        int numDirectArenas = Integer.valueOf(allocatorProperties.getProperty(
+            "numDirectArenas",
+            String.valueOf(Math.min(
+                runtime.availableProcessors(),
+                PlatformDependent.maxDirectMemory() / defaultChunkSize / 2 / 3)
+            )));
+        DEFAULT_NUM_DIRECT_ARENA = Math.max(0, numDirectArenas);
+
+        int defaultMaxMemory = Integer.valueOf(allocatorProperties.getProperty("maxMemory", "1024"));
+        Throwable maxMemoryFallbackCause = null;
+        try {
+            validateMaxMemory(DEFAULT_PAGE_SIZE, DEFAULT_MAX_ORDER,
+                DEFAULT_NUM_HEAP_ARENA, DEFAULT_NUM_DIRECT_ARENA, defaultMaxMemory);
+        } catch (Throwable t) {
+            System.out.println(t);
+            maxMemoryFallbackCause = t;
+            defaultMaxMemory = 1024;
+        }
+        DEFAULT_MAX_MEMORY_MB = defaultMaxMemory;
 
         if (logger.isDebugEnabled()) {
-            logger.debug("-Dio.netty.allocator.numHeapArenas: {}", DEFAULT_NUM_HEAP_ARENA);
-            logger.debug("-Dio.netty.allocator.numDirectArenas: {}", DEFAULT_NUM_DIRECT_ARENA);
+            logger.debug("numHeapArenas: {}", DEFAULT_NUM_HEAP_ARENA);
+            logger.debug("numDirectArenas: {}", DEFAULT_NUM_DIRECT_ARENA);
             if (pageSizeFallbackCause == null) {
-                logger.debug("-Dio.netty.allocator.pageSize: {}", DEFAULT_PAGE_SIZE);
+                logger.debug("pageSize: {}", DEFAULT_PAGE_SIZE);
             } else {
-                logger.debug("-Dio.netty.allocator.pageSize: {}", DEFAULT_PAGE_SIZE, pageSizeFallbackCause);
+                logger.debug("pageSize: {}", DEFAULT_PAGE_SIZE, pageSizeFallbackCause);
             }
             if (maxOrderFallbackCause == null) {
-                logger.debug("-Dio.netty.allocator.maxOrder: {}", DEFAULT_MAX_ORDER);
+                logger.debug("maxOrder: {}", DEFAULT_MAX_ORDER);
             } else {
-                logger.debug("-Dio.netty.allocator.maxOrder: {}", DEFAULT_MAX_ORDER, maxOrderFallbackCause);
+                logger.debug("maxOrder: {}", DEFAULT_MAX_ORDER, maxOrderFallbackCause);
             }
-            logger.debug("-Dio.netty.allocator.chunkSize: {}", DEFAULT_PAGE_SIZE << DEFAULT_MAX_ORDER);
+            logger.debug("chunkSize: {}", DEFAULT_PAGE_SIZE << DEFAULT_MAX_ORDER);
+            if (maxMemoryFallbackCause == null) {
+                logger.debug("maxMemory: {}", DEFAULT_MAX_MEMORY_MB);
+            } else {
+                logger.debug("maxMemory: {}", DEFAULT_MAX_MEMORY_MB, maxMemoryFallbackCause);
+            }
         }
     }
 
@@ -123,19 +156,11 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         }
     };
 
-    public PooledByteBufAllocator() {
-        this(false);
-    }
-
     public PooledByteBufAllocator(boolean preferDirect) {
         this(preferDirect, DEFAULT_NUM_HEAP_ARENA, DEFAULT_NUM_DIRECT_ARENA, DEFAULT_PAGE_SIZE, DEFAULT_MAX_ORDER);
     }
 
-    public PooledByteBufAllocator(int nHeapArena, int nDirectArena, int pageSize, int maxOrder) {
-        this(false, nHeapArena, nDirectArena, pageSize, maxOrder);
-    }
-
-    public PooledByteBufAllocator(boolean preferDirect, int nHeapArena, int nDirectArena, int pageSize, int maxOrder) {
+    private PooledByteBufAllocator(boolean preferDirect, int nHeapArena, int nDirectArena, int pageSize, int maxOrder) {
         super(preferDirect);
 
         final int chunkSize = validateAndCalculateChunkSize(pageSize, maxOrder);
@@ -214,6 +239,18 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         return chunkSize;
     }
 
+    private static void validateMaxMemory(int pageSize, int maxOrder, int nHeapArena, int nDirectArena, int maxMemory) {
+        int chunkSizeInMB = (pageSize << maxOrder) >>> 20;
+        if (chunkSizeInMB > maxMemory
+            || nHeapArena * chunkSizeInMB > maxMemory
+            || nDirectArena * chunkSizeInMB > maxMemory) {
+            throw new IllegalArgumentException(String.format(
+                "maxMemory (%dMB) must be equal or greater than " +
+                    "chunkSize (%dMB) * nHeapArena (%d) and nDirectArena (%d)",
+                maxMemory, chunkSizeInMB, nHeapArena, nDirectArena));
+        }
+    }
+
     @Override
     protected ByteBuf newHeapBuffer(int initialCapacity, int maxCapacity) {
         PoolThreadCache cache = threadCache.get();
@@ -240,6 +277,19 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         }
     }
 
+    public int memoryOccupation() {
+        int memoryOccupation = 0;
+        if (heapArenas != null) {
+            for(PoolArena<byte[]> heapArena: heapArenas)
+                memoryOccupation += heapArena.getArenaSizeInMB();
+        }
+        if (directArenas != null) {
+            for(PoolArena<ByteBuffer> directArena: directArenas)
+                memoryOccupation += directArena.getArenaSizeInMB();
+        }
+        return memoryOccupation;
+    }
+
     @Override
     public boolean isDirectBufferPooled() {
         return directArenas != null;
@@ -262,60 +312,4 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         return buf.toString();
     }
 
-  static int normalizeCapacity(int reqCapacity) {
-          if (reqCapacity < 0) {
-              throw new IllegalArgumentException("capacity: " + reqCapacity + " (expected: 0+)");
-          }
-          if (reqCapacity >= (8 * 1024) << 11) {
-              return reqCapacity;
-          }
-
-          if ((reqCapacity & 0xFFFFFE00) != 0) { // >= 512
-              // Doubled
-
-              int normalizedCapacity = reqCapacity;
-              normalizedCapacity |= normalizedCapacity >>>  1;
-              normalizedCapacity |= normalizedCapacity >>>  2;
-              normalizedCapacity |= normalizedCapacity >>>  4;
-              normalizedCapacity |= normalizedCapacity >>>  8;
-              normalizedCapacity |= normalizedCapacity >>> 16;
-              normalizedCapacity ++;
-
-              if (normalizedCapacity < 0) {
-                  normalizedCapacity >>>= 1;
-              }
-
-              return normalizedCapacity;
-          }
-
-          // Quantum-spaced
-          if ((reqCapacity & 15) == 0) {
-              return reqCapacity;
-          }
-
-          return (reqCapacity & ~15) + 16;
-      }
-
-  public static void main(String[] args){
-    int pageSize = 8 * 1024;
-    int maxOrder = 11;
-    System.out.println("chunkSize: " + validateAndCalculateChunkSize(pageSize, maxOrder));
-    System.out.println("pageShifts: " + validateAndCalculatePageShifts(pageSize));
-    System.out.println("subpageOverflowMask: " + ~(pageSize - 1));
-
-//    for (int i = 512; i < 1000; i++) {
-//      System.out.printf("%d => %d\n", i, normalizeCapacity(i));
-//    }
-
-    for(int i = 0; i <= 0xffff; i++){
-      for (int j = 0; j <= 0xffff; j++) {
-        int result = (i << 16) | j;
-        int newi = result >> 16;
-        int newj = result & 0xffff;
-        if(newi != i || newj != j){
-          System.out.print(".");
-        }
-      }
-    }
-  }
 }
