@@ -277,19 +277,6 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         }
     }
 
-    public int memoryOccupation() {
-        int memoryOccupation = 0;
-        if (heapArenas != null) {
-            for(PoolArena<byte[]> heapArena: heapArenas)
-                memoryOccupation += heapArena.getArenaSizeInMB();
-        }
-        if (directArenas != null) {
-            for(PoolArena<ByteBuffer> directArena: directArenas)
-                memoryOccupation += directArena.getArenaSizeInMB();
-        }
-        return memoryOccupation;
-    }
-
     /**
      *  for test
      * @return  chunk size

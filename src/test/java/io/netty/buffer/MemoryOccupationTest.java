@@ -11,19 +11,39 @@ import static org.junit.Assert.assertEquals;
  */
 public class MemoryOccupationTest {
 
+    static final PooledByteBufAllocator directAllocator = new PooledByteBufAllocator(true);
+    static final PooledByteBufAllocator heapAllocator = new PooledByteBufAllocator(false);
+    static final int CHUNK_SIZE = directAllocator.chunkSize();
+    static final int CHUNK_SIZE_MB = CHUNK_SIZE >>> 20;
+
     @Test
     public void testMemoryOccupationComputation() {
-        PooledByteBufAllocator allocator = new PooledByteBufAllocator(true);
-        final int CHUNK_SIZE = allocator.chunkSize();
-        final int CHUNK_SIZE_MB = CHUNK_SIZE >>> 20;
+        PoolArena.resetMemoryOccupationInMB();
 
-        allocator.buffer(CHUNK_SIZE - 1);
-        assertEquals(CHUNK_SIZE_MB, allocator.memoryOccupation());
+        directAllocator.buffer(CHUNK_SIZE - 1);
+        assertEquals(CHUNK_SIZE_MB, PoolArena.getMemoryOccupationInMB());
 
-        allocator.buffer(CHUNK_SIZE);
-        assertEquals(2 * CHUNK_SIZE_MB, allocator.memoryOccupation());
+        directAllocator.buffer(CHUNK_SIZE);
+        assertEquals(2 * CHUNK_SIZE_MB, PoolArena.getMemoryOccupationInMB());
 
-        allocator.buffer(CHUNK_SIZE + 1);
-        assertEquals(3 * CHUNK_SIZE_MB, allocator.memoryOccupation());
+        directAllocator.buffer(CHUNK_SIZE + 1);
+        assertEquals(3 * CHUNK_SIZE_MB, PoolArena.getMemoryOccupationInMB());
+    }
+
+    static class AllocateTask implements Runnable {
+        @Override
+        public void run() {
+            directAllocator.buffer(CHUNK_SIZE - 1);
+            heapAllocator.buffer(CHUNK_SIZE - 1);
+        }
+    }
+
+    public static void main(String... args) throws InterruptedException{
+        for (int i = 0; i < 10; i++) {
+            Thread t = new Thread(new AllocateTask());
+            t.start();
+        }
+        Thread.sleep(1000);
+        System.out.println(PoolArena.getMemoryOccupationInMB());
     }
 }

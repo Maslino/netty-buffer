@@ -32,7 +32,7 @@ abstract class PoolArena<T> {
     private final int chunkSize;
     private final int subpageOverflowMask;
 
-    private final AtomicInteger arenaSizeInMB;
+    private static final AtomicInteger memoryOccupationInMB = new AtomicInteger(0);
 
     private final PoolSubpage<T>[] tinySubpagePools;
     private final PoolSubpage<T>[] smallSubpagePools;
@@ -54,7 +54,6 @@ abstract class PoolArena<T> {
         this.pageShifts = pageShifts;
         this.chunkSize = chunkSize;
         subpageOverflowMask = ~(pageSize - 1);
-        this.arenaSizeInMB = new AtomicInteger(0);
 
         tinySubpagePools = newSubpagePoolArray(512 >>> 4);
         for (int i = 0; i < tinySubpagePools.length; i ++) {
@@ -145,7 +144,6 @@ abstract class PoolArena<T> {
 
         // Add a new chunk.
         PoolChunk<T> c = newChunk(pageSize, maxOrder, pageShifts, chunkSize);
-        arenaSizeInMB.addAndGet(chunkSize >>> 20);
         long handle = c.allocate(normCapacity);
         assert handle > 0;
         c.initBuf(buf, handle, reqCapacity);
@@ -154,11 +152,6 @@ abstract class PoolArena<T> {
 
     private void allocateHuge(PooledByteBuf<T> buf, int reqCapacity) {
         buf.initUnpooled(newUnpooledChunk(reqCapacity), reqCapacity);
-        arenaSizeInMB.addAndGet(chunkSize >>> 20);
-    }
-
-    public int getArenaSizeInMB() {
-        return arenaSizeInMB.get();
     }
 
     synchronized void free(PoolChunk<T> chunk, long handle) {
@@ -265,6 +258,17 @@ abstract class PoolArena<T> {
         }
     }
 
+    public static int getMemoryOccupationInMB() {
+        return memoryOccupationInMB.get();
+    }
+
+    /**
+     * for test only
+     */
+    public static void resetMemoryOccupationInMB() {
+        memoryOccupationInMB.set(0);
+    }
+
     protected abstract PoolChunk<T> newChunk(int pageSize, int maxOrder, int pageShifts, int chunkSize);
     protected abstract PoolChunk<T> newUnpooledChunk(int capacity);
     protected abstract PooledByteBuf<T> newByteBuf(int maxCapacity);
@@ -349,16 +353,19 @@ abstract class PoolArena<T> {
 
         @Override
         protected PoolChunk<byte[]> newChunk(int pageSize, int maxOrder, int pageShifts, int chunkSize) {
+            memoryOccupationInMB.addAndGet(chunkSize >>> 20);
             return new PoolChunk<byte[]>(this, new byte[chunkSize], pageSize, maxOrder, pageShifts, chunkSize);
         }
 
         @Override
         protected PoolChunk<byte[]> newUnpooledChunk(int capacity) {
+            memoryOccupationInMB.addAndGet(capacity >>> 20);
             return new PoolChunk<byte[]>(this, new byte[capacity], capacity);
         }
 
         @Override
         protected void destroyChunk(PoolChunk<byte[]> chunk) {
+            memoryOccupationInMB.addAndGet(-(chunk.memory.length >>> 20));
             // Rely on GC.
         }
 
@@ -387,17 +394,20 @@ abstract class PoolArena<T> {
 
         @Override
         protected PoolChunk<ByteBuffer> newChunk(int pageSize, int maxOrder, int pageShifts, int chunkSize) {
+            memoryOccupationInMB.addAndGet(chunkSize >>> 20);
             return new PoolChunk<ByteBuffer>(
                     this, ByteBuffer.allocateDirect(chunkSize), pageSize, maxOrder, pageShifts, chunkSize);
         }
 
         @Override
         protected PoolChunk<ByteBuffer> newUnpooledChunk(int capacity) {
+            memoryOccupationInMB.addAndGet(capacity >>> 20);
             return new PoolChunk<ByteBuffer>(this, ByteBuffer.allocateDirect(capacity), capacity);
         }
 
         @Override
         protected void destroyChunk(PoolChunk<ByteBuffer> chunk) {
+            memoryOccupationInMB.addAndGet(-(chunk.memory.capacity() >>> 20));
             PlatformDependent.freeDirectBuffer(chunk.memory);
         }
 
