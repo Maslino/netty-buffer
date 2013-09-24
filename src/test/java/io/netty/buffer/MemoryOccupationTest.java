@@ -18,16 +18,16 @@ public class MemoryOccupationTest {
 
     @Test
     public void testMemoryOccupationComputation() {
-        PoolArena.resetMemoryOccupationInMB();
+        int initialValue = PoolArena.getMemoryOccupationInMB();
 
         directAllocator.buffer(CHUNK_SIZE - 1);
-        assertEquals(CHUNK_SIZE_MB, PoolArena.getMemoryOccupationInMB());
+        assertEquals(CHUNK_SIZE_MB, PoolArena.getMemoryOccupationInMB() - initialValue);
 
         directAllocator.buffer(CHUNK_SIZE);
-        assertEquals(2 * CHUNK_SIZE_MB, PoolArena.getMemoryOccupationInMB());
+        assertEquals(2 * CHUNK_SIZE_MB, PoolArena.getMemoryOccupationInMB() - initialValue);
 
         directAllocator.buffer(CHUNK_SIZE + 1);
-        assertEquals(3 * CHUNK_SIZE_MB, PoolArena.getMemoryOccupationInMB());
+        assertEquals(3 * CHUNK_SIZE_MB, PoolArena.getMemoryOccupationInMB() - initialValue);
     }
 
     static class AllocateTask implements Runnable {

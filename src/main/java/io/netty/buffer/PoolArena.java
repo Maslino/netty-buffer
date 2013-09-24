@@ -262,13 +262,6 @@ abstract class PoolArena<T> {
         return memoryOccupationInMB.get();
     }
 
-    /**
-     * for test only
-     */
-    public static void resetMemoryOccupationInMB() {
-        memoryOccupationInMB.set(0);
-    }
-
     protected abstract PoolChunk<T> newChunk(int pageSize, int maxOrder, int pageShifts, int chunkSize);
     protected abstract PoolChunk<T> newUnpooledChunk(int capacity);
     protected abstract PooledByteBuf<T> newByteBuf(int maxCapacity);

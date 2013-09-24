@@ -16,6 +16,8 @@
 
 package io.netty.buffer;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 final class PoolChunk<T> {
     // chunk status
     private static final int ST_UNUSED = 0;
@@ -28,6 +30,9 @@ final class PoolChunk<T> {
     private static final long multiplier = 0x5DEECE66DL;
     private static final long addend = 0xBL;
     private static final long mask = (1L << 48) - 1;
+
+    private static final AtomicInteger nextChunkId = new AtomicInteger(0);
+    private final int id;
 
     final PoolArena<T> arena;
     final T memory;
@@ -55,6 +60,7 @@ final class PoolChunk<T> {
     //private long pad0, pad1, pad2, pad3, pad4, pad5, pad6, pad7;
 
     PoolChunk(PoolArena<T> arena, T memory, int pageSize, int maxOrder, int pageShifts, int chunkSize) {
+        id = nextChunkId.getAndIncrement();
         unpooled = false;
         this.arena = arena;
         this.memory = memory;
@@ -83,6 +89,7 @@ final class PoolChunk<T> {
 
     /** Creates a special chunk that is not pooled. */
     PoolChunk(PoolArena<T> arena, T memory, int size) {
+        id = nextChunkId.getAndIncrement();
         unpooled = true;
         this.arena = arena;
         this.memory = memory;
@@ -336,10 +343,21 @@ final class PoolChunk<T> {
         return (int) (random >>> 47) & 1;
     }
 
+    /**
+     * for test only
+     */
+    public static int getNextChunkId() {
+        return nextChunkId.get();
+    }
+
+    public int getId() {
+        return id;
+    }
+
     public String toString() {
         StringBuilder buf = new StringBuilder();
         buf.append("Chunk(");
-        buf.append(Integer.toHexString(System.identityHashCode(this)));
+        buf.append(id);
         buf.append(": ");
         buf.append(usage());
         buf.append("%, ");
