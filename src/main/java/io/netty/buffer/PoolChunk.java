@@ -16,7 +16,7 @@
 
 package io.netty.buffer;
 
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 final class PoolChunk<T> {
     // chunk status
@@ -31,8 +31,8 @@ final class PoolChunk<T> {
     private static final long addend = 0xBL;
     private static final long mask = (1L << 48) - 1;
 
-    private static final AtomicInteger nextChunkId = new AtomicInteger(0);
-    private final int id;
+    private static final AtomicLong nextChunkId = new AtomicLong(0);
+    private final long id;
 
     final PoolArena<T> arena;
     final T memory;
@@ -346,11 +346,11 @@ final class PoolChunk<T> {
     /**
      * for test only
      */
-    public static int getNextChunkId() {
+    public static long getNextChunkId() {
         return nextChunkId.get();
     }
 
-    public int getId() {
+    public long getId() {
         return id;
     }
 
