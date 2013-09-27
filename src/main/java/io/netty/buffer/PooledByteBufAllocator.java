@@ -16,11 +16,13 @@
 
 package io.netty.buffer;
 
+import io.netty.disk.BlockDisk;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -41,6 +43,9 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
     private static final int MAX_CHUNK_SIZE = (int) (((long) Integer.MAX_VALUE + 1) / 2);
 
     private static final int DEFAULT_MAX_MEMORY_MB;    // in MB, default to 1024
+
+    private static final BlockDisk<byte[]> heapBlockDisk;
+    private static final BlockDisk<ByteBuffer> directBlockDisk;
 
     static {
         Properties allocatorProperties = new Properties();
@@ -103,6 +108,15 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
             defaultMaxMemory = 1024;
         }
         DEFAULT_MAX_MEMORY_MB = defaultMaxMemory;
+
+        try {
+            File tempFile = File.createTempFile("heap", ".dat");
+            heapBlockDisk = new BlockDisk.HeapBlockDisk(tempFile.getAbsolutePath());
+            tempFile = File.createTempFile("direct", ".dat");
+            directBlockDisk = new BlockDisk.DirectBlockDisk(tempFile.getAbsolutePath());
+        } catch (IOException iox) {
+            throw new Error(iox.getMessage());
+        }
 
         if (logger.isDebugEnabled()) {
             logger.debug("numHeapArenas: {}", DEFAULT_NUM_HEAP_ARENA);
@@ -283,6 +297,18 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
      */
     public int chunkSize() {
         return DEFAULT_PAGE_SIZE << DEFAULT_MAX_ORDER;
+    }
+
+    public static int getDefaultMaxMemoryMB() {
+        return DEFAULT_MAX_MEMORY_MB;
+    }
+
+    public static BlockDisk<byte[]> getHeapBlockDisk() {
+        return heapBlockDisk;
+    }
+
+    public static BlockDisk<ByteBuffer> getDirectBlockDisk() {
+        return directBlockDisk;
     }
 
     @Override
