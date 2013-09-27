@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * This class manages reading and writing data to disk. When asked to write a value, it returns a
  * block array. It can read an object from the block numbers in a byte array.
  */
-public class BlockDisk {
+public abstract class BlockDisk<T> {
 
     /** The size of the header that indicates the amount of data stored in an occupied block. */
     private static final byte HEADER_SIZE_BYTES = 2;
@@ -21,7 +21,7 @@ public class BlockDisk {
     private static final short DEFAULT_BLOCK_SIZE_BYTES = 4 << 10;
 
     /** Size of the block */
-    private final short blockSizeBytes;
+    protected final short blockSizeBytes;
 
     /**
      * the total number of blocks that have been used. If there are no free, we will use this to
@@ -36,13 +36,13 @@ public class BlockDisk {
     private final String filepath;
 
     /** File channel for multiple concurrent reads and writes */
-    private final FileChannel fileChannel;
+    protected final FileChannel fileChannel;
 
-    public BlockDisk(String filepath) throws FileNotFoundException {
+    protected BlockDisk(String filepath) throws FileNotFoundException {
         this(filepath, DEFAULT_BLOCK_SIZE_BYTES);
     }
 
-    public BlockDisk(String filepath, short blockSizeBytes) throws FileNotFoundException {
+    protected BlockDisk(String filepath, short blockSizeBytes) throws FileNotFoundException {
         validateBlockSize(blockSizeBytes);
         this.filepath = filepath;
         RandomAccessFile raf = new RandomAccessFile(filepath, "rw");
@@ -56,16 +56,16 @@ public class BlockDisk {
         }
 
         // Ensure block size is power of 2
-        for (short i = blockSizeBytes; i >= 2 ; i >>= 1) {
-            if ((i & 1) != 0) {
-                throw new IllegalArgumentException("block size: " + blockSizeBytes + " (expected: power of 2)");
-            }
+        if ((blockSizeBytes & (blockSizeBytes - 1)) != 0) {
+            throw new IllegalArgumentException("block size: " + blockSizeBytes + " (expected: power of 2)");
         }
     }
 
-    public int[] write(byte[] data) throws IOException {
-        // figure out how many blocks we need.
-        int numBlocksNeeded = calculateTheNumberOfBlocksNeeded(data);
+    public abstract int[] write(T data) throws IOException;
+    public abstract T read(int[] blocks) throws IOException;
+
+    protected int[] allocateBlocks(int numBlocksNeeded) {
+        assert numBlocksNeeded >= 1;
 
         int[] blocks = new int[numBlocksNeeded];
         // get them from the empty list or take the next one
@@ -77,100 +77,7 @@ public class BlockDisk {
             blocks[i] = emptyBlock;
         }
 
-        // get the individual sub arrays.
-        byte[][] chunks = getBlockChunks(data, numBlocksNeeded);
-
-        // write the blocks
-        for (int i = 0; i < numBlocksNeeded; i++) {
-            long position = calculateByteOffsetForBlock(blocks[i]);
-            boolean success = write(position, chunks[i]);
-            if (!success) {
-                System.err.println("write failed?");
-            }
-        }
-
         return blocks;
-    }
-
-    private byte[][] getBlockChunks(byte[] complete, int numBlocksNeeded) {
-        byte[][] chunks = new byte[numBlocksNeeded][];
-        if (numBlocksNeeded == 1) {
-            chunks[0] = complete;
-        } else {
-            int maxChunkSize = blockSizeBytes - HEADER_SIZE_BYTES;
-            int totalBytes = complete.length;
-            int totalUsed = 0;
-            for (int i = 0; i < numBlocksNeeded; i++ ) {
-                // use the max that can be written to a block or whatever is left in the original array
-                int chunkSize = Math.min(maxChunkSize, totalBytes - totalUsed);
-                byte[] chunk = new byte[chunkSize];
-                // copy from the used position to the chunk size on the complete array to the chunk array.
-                System.arraycopy(complete, totalUsed, chunk, 0, chunkSize);
-                chunks[i] = chunk;
-                totalUsed += chunkSize;
-            }
-        }
-
-        return chunks;
-    }
-
-    private boolean write(long position, byte[] data) throws IOException {
-        ByteBuffer buffer = ByteBuffer.allocate(HEADER_SIZE_BYTES + data.length);
-        buffer.putShort((short) data.length);
-        buffer.put(data);
-        buffer.flip();
-        int written = fileChannel.write(buffer, position);
-        fileChannel.force(false);
-
-        return written == data.length + HEADER_SIZE_BYTES;
-    }
-
-    public byte[] read(int[] blockNumbers) throws IOException {
-        byte[] data = null;
-
-        if (blockNumbers.length == 1) {
-            data = readBlock(blockNumbers[0]);
-        } else {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream(blockSizeBytes);
-            // get all the blocks into data
-            for (int blockNumber : blockNumbers) {
-                byte[] chunk = readBlock(blockNumber);
-                baos.write(chunk);
-            }
-
-            data = baos.toByteArray();
-            baos.close();
-        }
-
-        return data;
-    }
-
-    private byte[] readBlock(int block) throws IOException {
-        short dataLength = 0;
-        String message = null;
-        boolean corrupted = false;
-        long position = calculateByteOffsetForBlock(block);
-
-        ByteBuffer header = ByteBuffer.allocate(HEADER_SIZE_BYTES);
-        fileChannel.read(header, position);
-        header.flip();
-        dataLength = header.getShort();
-
-        if (position + dataLength + HEADER_SIZE_BYTES > length()) {
-            corrupted = true;
-            message = "Record " + position + " exceeds file length.";
-        }
-
-        if (corrupted) {
-            System.err.println("\n The file is corrupt: " + "\n " + message);
-            throw new IOException("The File Is Corrupt.");
-        }
-
-        ByteBuffer data = ByteBuffer.allocate(dataLength);
-        fileChannel.read(data, position + HEADER_SIZE_BYTES);
-        data.flip();
-
-        return data.array();
     }
 
     public void freeBlocks(int[] blocksToFree) {
@@ -181,20 +88,19 @@ public class BlockDisk {
         }
     }
 
-    private long calculateByteOffsetForBlock(int block) {
+    protected long calculateByteOffsetForBlock(int block) {
         return (long)block * (long)blockSizeBytes;
     }
 
-    private int calculateTheNumberOfBlocksNeeded(byte[] data) {
-        int dataLength = data.length;
+    protected int calculateTheNumberOfBlocksNeeded(int numBytes) {
         int oneBlock = blockSizeBytes - HEADER_SIZE_BYTES;
 
-        if (dataLength <= oneBlock) {
+        if (numBytes <= oneBlock) {
             return 1;
         }
 
-        int divided = dataLength / oneBlock;
-        if (dataLength % oneBlock != 0) {
+        int divided = numBytes / oneBlock;
+        if (numBytes % oneBlock != 0) {
             divided++;
         }
 
@@ -243,6 +149,140 @@ public class BlockDisk {
         }
 
         return sb.toString();
+    }
+
+    public static final class HeapBlockDisk extends BlockDisk<byte[]> {
+
+        public HeapBlockDisk(String filepath) throws FileNotFoundException {
+            super(filepath);
+        }
+
+        public HeapBlockDisk(String filepath, short blockSizeBytes) throws FileNotFoundException {
+            super(filepath, blockSizeBytes);
+        }
+
+        @Override
+        public int[] write(byte[] data) throws IOException {
+            final int numBlocksNeeded = calculateTheNumberOfBlocksNeeded(data.length);
+            final int[] blocks = allocateBlocks(numBlocksNeeded);
+
+            // write data to each block
+            final int maxChunkSize = blockSizeBytes - HEADER_SIZE_BYTES;
+            int offset = 0;
+
+            ByteBuffer headerBuffer = ByteBuffer.allocate(HEADER_SIZE_BYTES);
+            for (int i = 0; i < numBlocksNeeded; i++) {
+                headerBuffer.clear();
+                int length = Math.min(maxChunkSize, data.length - offset);
+                headerBuffer.putShort((short)length);
+                ByteBuffer dataBuffer = ByteBuffer.wrap(data, offset, length);
+
+                long position = calculateByteOffsetForBlock(blocks[i]);
+                headerBuffer.flip();
+                int written = fileChannel.write(headerBuffer, position);
+                assert written == HEADER_SIZE_BYTES;
+
+                written = fileChannel.write(dataBuffer, position + HEADER_SIZE_BYTES);
+                assert written == length;
+
+                offset += length;
+            }
+            fileChannel.force(false);
+
+            return blocks;
+        }
+
+        @Override
+        public byte[] read(int[] blocks) throws IOException {
+            assert blocks != null && blocks.length >= 1;
+
+            ByteBuffer blockBuffer = ByteBuffer.allocate(blockSizeBytes);
+            int initialSize = blocks.length == 1 ? blockSizeBytes : blockSizeBytes * (blocks.length - 1);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(initialSize);
+
+            for (int i = 0; i < blocks.length; i++) {
+                blockBuffer.clear();
+
+                long position = calculateByteOffsetForBlock(blocks[i]);
+                int nRead = fileChannel.read(blockBuffer, position);
+                short length = blockBuffer.getShort(0);
+                assert nRead == HEADER_SIZE_BYTES + length;
+
+                baos.write(blockBuffer.array(), HEADER_SIZE_BYTES, length);
+            }
+
+            byte[] data = baos.toByteArray();
+            baos.close();
+
+            return data;
+        }
+    }
+
+    public static final class DirectBlockDisk extends BlockDisk<ByteBuffer> {
+
+        public DirectBlockDisk(String filepath) throws FileNotFoundException {
+            super(filepath);
+        }
+
+        public DirectBlockDisk(String filepath, short blockSizeBytes) throws FileNotFoundException {
+            super(filepath, blockSizeBytes);
+        }
+
+        @Override
+        public int[] write(ByteBuffer data) throws IOException {
+            final int totalBytes = data.remaining();
+            final int numBlocksNeeded = calculateTheNumberOfBlocksNeeded(totalBytes);
+            final int[] blocks = allocateBlocks(numBlocksNeeded);
+
+            final int maxChunkSize = blockSizeBytes - HEADER_SIZE_BYTES;
+            final int bufferLimit = data.limit();
+
+            ByteBuffer headerBuffer = ByteBuffer.allocate(HEADER_SIZE_BYTES);
+            for (int i = 0; i < numBlocksNeeded; i++) {
+                int bufferPosition = data.position();
+                headerBuffer.clear();
+
+                int length = Math.min(maxChunkSize, bufferLimit - bufferPosition);
+                headerBuffer.putShort((short)length);
+                headerBuffer.flip();
+                long position = calculateByteOffsetForBlock(blocks[i]);
+                int written = fileChannel.write(headerBuffer, position);
+                assert written == HEADER_SIZE_BYTES;
+
+                data.limit(bufferPosition + length);
+                written = fileChannel.write(data, position + HEADER_SIZE_BYTES);
+                assert written == length;
+            }
+            fileChannel.force(false);
+
+            return blocks;
+        }
+
+        @Override
+        public ByteBuffer read(int[] blocks) throws IOException {
+            assert blocks != null && blocks.length >= 1;
+
+            int offset = 0;
+            ByteBuffer dataBuffer = ByteBuffer.allocateDirect(blockSizeBytes * blocks.length);
+            for (int i = 0; i < blocks.length; i++) {
+                long position = calculateByteOffsetForBlock(blocks[i]);
+
+                dataBuffer.limit(offset + HEADER_SIZE_BYTES);
+                int nRead = fileChannel.read(dataBuffer, position);
+                assert nRead == HEADER_SIZE_BYTES;
+                short length = dataBuffer.getShort(offset);
+
+                dataBuffer.position(offset);
+                dataBuffer.limit(offset + length);
+                nRead = fileChannel.read(dataBuffer, position + HEADER_SIZE_BYTES);
+                assert nRead == length;
+
+                offset += length;
+            }
+            dataBuffer.position(0);
+
+            return dataBuffer;
+        }
     }
 
 }
