@@ -16,17 +16,29 @@
 
 package io.netty.buffer;
 
+import io.netty.util.Pair;
 import io.netty.util.Recycler;
 import io.netty.util.ResourceLeak;
+import io.netty.util.internal.chmv8.ConcurrentHashMapV8;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.concurrent.atomic.AtomicLong;
 
 abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
+
+    private static final AtomicLong nextId = new AtomicLong(0);
+    private static final ConcurrentHashMapV8<Pair<Long, Long>, Long> inMemoryMap =
+        new ConcurrentHashMapV8<Pair<Long, Long>, Long>();
+    private static final ConcurrentHashMapV8<Long, int[]> onDiskMap =
+        new ConcurrentHashMapV8<Long, int[]>();
 
     private final ResourceLeak leak;
     private final Recycler.Handle recyclerHandle;
 
+    protected Pair<Long, Long> inMemoryKey;
+    protected long id;
     protected PoolChunk<T> chunk;
     protected long handle;
     protected T memory;
@@ -40,6 +52,7 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
         super(maxCapacity);
         leak = leakDetector.open(this);
         this.recyclerHandle = recyclerHandle;
+        this.id = nextId.getAndIncrement();
     }
 
     void init(PoolChunk<T> chunk, long handle, int offset, int length, int maxLength) {
@@ -54,6 +67,9 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
         this.maxLength = maxLength;
         setIndex(0, 0);
         tmpNioBuf = null;
+
+        inMemoryKey = new Pair<Long, Long>(this.chunk.getId(), this.handle);
+        inMemoryMap.put(inMemoryKey, id);
     }
 
     void initUnpooled(PoolChunk<T> chunk, int length) {
@@ -66,6 +82,9 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
         this.length = maxLength = length;
         setIndex(0, 0);
         tmpNioBuf = null;
+
+        inMemoryKey = new Pair<Long, Long>(this.chunk.getId(), this.handle);
+        inMemoryMap.put(inMemoryKey, id);
     }
 
     @Override
@@ -129,7 +148,8 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
 
     protected final ByteBuffer internalNioBuffer() {
         ByteBuffer tmpNioBuf = this.tmpNioBuf;
-        if (tmpNioBuf == null) {
+        if (tmpNioBuf == null || isOnDisk()) {
+            swapInIfNeeded();
             this.tmpNioBuf = tmpNioBuf = newInternalNioBuffer(memory);
         }
         return tmpNioBuf;
@@ -143,7 +163,8 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
             final long handle = this.handle;
             this.handle = -1;
             memory = null;
-            chunk.arena.free(chunk, handle);
+            chunk.arena.freeAll(chunk, handle, id);
+
             if (leak != null) {
                 leak.close();
             } else {
@@ -164,5 +185,45 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
 
     protected final int idx(int index) {
         return offset + index;
+    }
+
+    public static ConcurrentHashMapV8<Pair<Long, Long>, Long> getInMemoryMap() {
+        return inMemoryMap;
+    }
+
+    public static ConcurrentHashMapV8<Long, int[]> getOnDiskMap() {
+        return onDiskMap;
+    }
+
+    protected boolean isOnDisk() {
+        return onDiskMap.containsKey(id);
+    }
+
+    protected void swapInIfNeeded() {
+        if (!isOnDisk()) {
+            return;
+        }
+
+        synchronized (this) {
+            if (!isOnDisk()) {
+                return;
+            }
+
+            long oldId = id;
+            int oldRefCnt = refCnt();
+            int oldLength = length;
+            int oldMaxLength = maxLength;
+
+            try {
+                chunk.arena.swapIn(this, oldLength, oldMaxLength);
+            } catch (IOException iox) {
+                throw new RuntimeException(iox);
+            }
+
+            assert oldId == this.id;
+            assert oldRefCnt == refCnt();
+            assert oldLength == this.length;
+            assert oldMaxLength == this.maxLength;
+        }
     }
 }

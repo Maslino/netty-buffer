@@ -16,10 +16,15 @@
 
 package io.netty.buffer;
 
+import io.netty.disk.BlockDisk;
+import io.netty.util.Pair;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
+import io.netty.util.internal.chmv8.ConcurrentHashMapV8;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicInteger;
 
 abstract class PoolArena<T> {
 
@@ -30,6 +35,8 @@ abstract class PoolArena<T> {
     private final int pageShifts;
     private final int chunkSize;
     private final int subpageOverflowMask;
+
+    private static final AtomicInteger memoryOccupationInMB = new AtomicInteger(0);
 
     private final PoolSubpage<T>[] tinySubpagePools;
     private final PoolSubpage<T>[] smallSubpagePools;
@@ -132,11 +139,30 @@ abstract class PoolArena<T> {
         allocateNormal(buf, reqCapacity, normCapacity);
     }
 
+    private boolean allocateFromChunkList(PooledByteBuf<T> buf, int reqCapacity, int normCapacity) {
+        return q050.allocate(buf, reqCapacity, normCapacity)
+            || q025.allocate(buf, reqCapacity, normCapacity)
+            || q000.allocate(buf, reqCapacity, normCapacity)
+            || qInit.allocate(buf, reqCapacity, normCapacity)
+            || q075.allocate(buf, reqCapacity, normCapacity)
+            || q100.allocate(buf, reqCapacity, normCapacity);
+    }
+
     private synchronized void allocateNormal(PooledByteBuf<T> buf, int reqCapacity, int normCapacity) {
-        if (q050.allocate(buf, reqCapacity, normCapacity) || q025.allocate(buf, reqCapacity, normCapacity) ||
-            q000.allocate(buf, reqCapacity, normCapacity) || qInit.allocate(buf, reqCapacity, normCapacity) ||
-            q075.allocate(buf, reqCapacity, normCapacity) || q100.allocate(buf, reqCapacity, normCapacity)) {
+        if (allocateFromChunkList(buf, reqCapacity, normCapacity)) {
             return;
+        }
+
+        System.out.println("current memory occupation: " + getMemoryOccupationInMB());
+        if (getMemoryOccupationInMB() > PooledByteBufAllocator.getDefaultMaxMemoryMB()) {
+            try {
+                System.out.println("time to swap!");
+                if (swapOut(buf, reqCapacity, normCapacity)) {
+                    return;
+                }
+            } catch (IOException iox) {
+                //ignore: this will result in allocation in a new chunk
+            }
         }
 
         // Add a new chunk.
@@ -145,6 +171,117 @@ abstract class PoolArena<T> {
         assert handle > 0;
         c.initBuf(buf, handle, reqCapacity);
         qInit.add(c);
+    }
+
+    synchronized boolean swapOut(PooledByteBuf<T> buf, int reqCapacity, int normCapacity) throws IOException {
+        System.out.println("find swappable run...");
+
+        Pair<PoolChunk<T>, Long> found = q100.findSwappable(buf, reqCapacity, normCapacity);
+        if (found != null) {
+            if (doSwapOut(buf, reqCapacity, normCapacity, found)) {
+                return true;
+            } else {
+                System.out.println("should not go here!");
+            }
+        }
+
+        found = q075.findSwappable(buf, reqCapacity, normCapacity);
+        if (found != null) {
+            if (doSwapOut(buf, reqCapacity, normCapacity, found)) {
+                return true;
+            } else {
+                System.out.println("should not go here!");
+            }
+        }
+
+        found = q050.findSwappable(buf, reqCapacity, normCapacity);
+        if (found != null) {
+            if (doSwapOut(buf, reqCapacity, normCapacity, found)) {
+                return true;
+            } else {
+                System.out.println("should not go here!");
+            }
+        }
+
+        found = q025.findSwappable(buf, reqCapacity, normCapacity);
+        if (found != null) {
+            if (doSwapOut(buf, reqCapacity, normCapacity, found)) {
+                return true;
+            } else {
+                System.out.println("should not go here!");
+            }
+        }
+
+        found = q000.findSwappable(buf, reqCapacity, normCapacity);
+        if (found != null) {
+            if (doSwapOut(buf, reqCapacity, normCapacity, found)) {
+                return true;
+            } else {
+                System.out.println("should not go here!");
+            }
+        }
+
+        return false;
+    }
+
+    private boolean doSwapOut(PooledByteBuf<T> buf, int reqCapacity, int normCapacity, Pair<PoolChunk<T>, Long> found) throws IOException {
+        // swap to disk
+        final PoolChunk<T> chunk = found.first;
+        final long handle = found.second;
+
+        int val = chunk.getMemoryMap()[(int)handle];
+        T data = newMemory(chunk.runLength(val));
+
+        System.out.println("copy to temp memory...");
+
+        memoryCopy(chunk.memory, chunk.runOffset(val), data, 0, chunk.runLength(val));
+
+        System.out.println("write " + chunk.runLength(val) + " bytes to disk...");
+
+        int[] blocks = getBlockDisk().write(data);
+
+        freeMemory(data);
+
+        ConcurrentHashMapV8<Pair<Long, Long>, Long> inMemoryMap = PooledByteBuf.getInMemoryMap();
+        ConcurrentHashMapV8<Long, int[]> onDiskMap = PooledByteBuf.getOnDiskMap();
+
+        System.out.println("update global in-memory map and on-disk map...");
+        System.out.println("before update, in-memory map size: " + inMemoryMap.size() +
+            ", on-disk map size: " + onDiskMap.size());
+
+        Pair<Long, Long> swapOutByteBufInMemoryKey = new Pair<Long, Long>(chunk.getId(), handle);
+
+        assert inMemoryMap.containsKey(swapOutByteBufInMemoryKey);
+        assert !onDiskMap.containsKey(inMemoryMap.get(swapOutByteBufInMemoryKey));
+
+        onDiskMap.put(inMemoryMap.get(swapOutByteBufInMemoryKey), blocks);
+        inMemoryMap.remove(swapOutByteBufInMemoryKey);
+
+        System.out.println("after update, in-memory map size: " + inMemoryMap.size() +
+            ", on-disk map size: " + onDiskMap.size());
+
+        // free to memory pool
+        free(chunk, handle);
+
+        // allocate
+        return allocateFromChunkList(buf, reqCapacity, normCapacity);
+    }
+
+    synchronized void swapIn(PooledByteBuf<T> buf, int reqCapacity, int normCapacity) throws IOException {
+        assert normCapacity >= pageSize;
+
+        allocate(parent.threadCache.get(), buf, reqCapacity);
+
+        ConcurrentHashMapV8<Long, int[]> onDiskMap = PooledByteBuf.getOnDiskMap();
+        int[] blocks = onDiskMap.get(buf.id);
+        T data = getBlockDisk().read(blocks);
+
+        memoryCopy(data, 0, buf.memory, buf.offset, buf.length);
+
+        freeMemory(data);
+
+        getBlockDisk().freeBlocks(blocks);
+        onDiskMap.remove(buf.id);
     }
 
     private void allocateHuge(PooledByteBuf<T> buf, int reqCapacity) {
@@ -156,6 +293,24 @@ abstract class PoolArena<T> {
             destroyChunk(chunk);
         } else {
             chunk.parent.free(chunk, handle);
+        }
+    }
+
+    synchronized void freeAll(PoolChunk<T> chunk, long handle, long bufId) {
+        free(chunk, handle);
+
+        // free disk blocks
+        ConcurrentHashMapV8<Pair<Long, Long>, Long> inMemoryMap = PooledByteBuf.getInMemoryMap();
+        ConcurrentHashMapV8<Long, int[]> onDiskMap = PooledByteBuf.getOnDiskMap();
+        Pair<Long, Long> inMemoryKey = new Pair<Long, Long>(chunk.getId(), handle);
+        if (inMemoryMap.containsKey(inMemoryKey)) {
+            assert !onDiskMap.containsKey(inMemoryMap.get(inMemoryKey));
+            assert inMemoryMap.get(inMemoryKey) == bufId;
+            inMemoryMap.remove(inMemoryKey);
+        } else {
+            assert onDiskMap.containsKey(bufId);
+            getBlockDisk().freeBlocks(onDiskMap.get(bufId));
+            onDiskMap.remove(bufId);
         }
     }
 
@@ -255,6 +410,13 @@ abstract class PoolArena<T> {
         }
     }
 
+    public static int getMemoryOccupationInMB() {
+        return memoryOccupationInMB.get();
+    }
+
+    protected abstract BlockDisk<T> getBlockDisk();
+    protected abstract T newMemory(int capacity);
+    protected abstract void freeMemory(T memory);
     protected abstract PoolChunk<T> newChunk(int pageSize, int maxOrder, int pageShifts, int chunkSize);
     protected abstract PoolChunk<T> newUnpooledChunk(int capacity);
     protected abstract PooledByteBuf<T> newByteBuf(int maxCapacity);
@@ -339,16 +501,19 @@ abstract class PoolArena<T> {
 
         @Override
         protected PoolChunk<byte[]> newChunk(int pageSize, int maxOrder, int pageShifts, int chunkSize) {
+            memoryOccupationInMB.addAndGet(chunkSize >>> 20);
             return new PoolChunk<byte[]>(this, new byte[chunkSize], pageSize, maxOrder, pageShifts, chunkSize);
         }
 
         @Override
         protected PoolChunk<byte[]> newUnpooledChunk(int capacity) {
+            memoryOccupationInMB.addAndGet(capacity >>> 20);
             return new PoolChunk<byte[]>(this, new byte[capacity], capacity);
         }
 
         @Override
         protected void destroyChunk(PoolChunk<byte[]> chunk) {
+            memoryOccupationInMB.addAndGet(-(chunk.memory.length >>> 20));
             // Rely on GC.
         }
 
@@ -365,6 +530,21 @@ abstract class PoolArena<T> {
 
             System.arraycopy(src, srcOffset, dst, dstOffset, length);
         }
+
+        @Override
+        protected byte[] newMemory(int capacity) {
+            return new byte[capacity];
+        }
+
+        @Override
+        protected void freeMemory(byte[] memory) {
+            // Rely on GC
+        }
+
+        @Override
+        protected BlockDisk<byte[]> getBlockDisk() {
+            return PooledByteBufAllocator.getHeapBlockDisk();
+        }
     }
 
     static final class DirectArena extends PoolArena<ByteBuffer> {
@@ -377,17 +557,20 @@ abstract class PoolArena<T> {
 
         @Override
         protected PoolChunk<ByteBuffer> newChunk(int pageSize, int maxOrder, int pageShifts, int chunkSize) {
+            memoryOccupationInMB.addAndGet(chunkSize >>> 20);
             return new PoolChunk<ByteBuffer>(
                     this, ByteBuffer.allocateDirect(chunkSize), pageSize, maxOrder, pageShifts, chunkSize);
         }
 
         @Override
         protected PoolChunk<ByteBuffer> newUnpooledChunk(int capacity) {
+            memoryOccupationInMB.addAndGet(capacity >>> 20);
             return new PoolChunk<ByteBuffer>(this, ByteBuffer.allocateDirect(capacity), capacity);
         }
 
         @Override
         protected void destroyChunk(PoolChunk<ByteBuffer> chunk) {
+            memoryOccupationInMB.addAndGet(-(chunk.memory.capacity() >>> 20));
             PlatformDependent.freeDirectBuffer(chunk.memory);
         }
 
@@ -417,7 +600,23 @@ abstract class PoolArena<T> {
                 src.position(srcOffset).limit(srcOffset + length);
                 dst.position(dstOffset);
                 dst.put(src);
+                dst.flip();
             }
+        }
+
+        @Override
+        protected ByteBuffer newMemory(int capacity) {
+            return ByteBuffer.allocateDirect(capacity);
+        }
+
+        @Override
+        protected void freeMemory(ByteBuffer memory) {
+            PlatformDependent.freeDirectBuffer(memory);
+        }
+
+        @Override
+        protected BlockDisk<ByteBuffer> getBlockDisk() {
+            return PooledByteBufAllocator.getDirectBlockDisk();
         }
     }
 }
