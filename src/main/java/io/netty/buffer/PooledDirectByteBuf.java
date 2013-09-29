@@ -58,33 +58,39 @@ final class PooledDirectByteBuf extends PooledByteBuf<ByteBuffer> {
 
     @Override
     protected byte _getByte(int index) {
+        swapInIfNeeded();
         return memory.get(idx(index));
     }
 
     @Override
     protected short _getShort(int index) {
+        swapInIfNeeded();
         return memory.getShort(idx(index));
     }
 
     @Override
     protected int _getUnsignedMedium(int index) {
+        swapInIfNeeded();
         index = idx(index);
         return (memory.get(index) & 0xff) << 16 | (memory.get(index + 1) & 0xff) << 8 | memory.get(index + 2) & 0xff;
     }
 
     @Override
     protected int _getInt(int index) {
+        swapInIfNeeded();
         return memory.getInt(idx(index));
     }
 
     @Override
     protected long _getLong(int index) {
+        swapInIfNeeded();
         return memory.getLong(idx(index));
     }
 
     @Override
     public ByteBuf getBytes(int index, ByteBuf dst, int dstIndex, int length) {
         checkDstIndex(index, length, dstIndex, dst.capacity());
+        swapInIfNeeded();
         if (dst.hasArray()) {
             getBytes(index, dst.array(), dst.arrayOffset() + dstIndex, length);
         } else if (dst.nioBufferCount() > 0) {
@@ -150,16 +156,19 @@ final class PooledDirectByteBuf extends PooledByteBuf<ByteBuffer> {
 
     @Override
     protected void _setByte(int index, int value) {
+        swapInIfNeeded();
         memory.put(idx(index), (byte) value);
     }
 
     @Override
     protected void _setShort(int index, int value) {
+        swapInIfNeeded();
         memory.putShort(idx(index), (short) value);
     }
 
     @Override
     protected void _setMedium(int index, int value) {
+        swapInIfNeeded();
         index = idx(index);
         memory.put(index, (byte) (value >>> 16));
         memory.put(index + 1, (byte) (value >>> 8));
@@ -168,17 +177,20 @@ final class PooledDirectByteBuf extends PooledByteBuf<ByteBuffer> {
 
     @Override
     protected void _setInt(int index, int value) {
+        swapInIfNeeded();
         memory.putInt(idx(index), value);
     }
 
     @Override
     protected void _setLong(int index, long value) {
+        swapInIfNeeded();
         memory.putLong(idx(index), value);
     }
 
     @Override
     public ByteBuf setBytes(int index, ByteBuf src, int srcIndex, int length) {
         checkSrcIndex(index, length, srcIndex, src.capacity());
+        swapInIfNeeded();
         if (src.hasArray()) {
             setBytes(index, src.array(), src.arrayOffset() + srcIndex, length);
         } else if (src.nioBufferCount() > 0) {
@@ -247,6 +259,7 @@ final class PooledDirectByteBuf extends PooledByteBuf<ByteBuffer> {
     @Override
     public ByteBuf copy(int index, int length) {
         checkIndex(index, length);
+        swapInIfNeeded();
         ByteBuf copy = alloc().directBuffer(length, maxCapacity());
         copy.writeBytes(this, index, length);
         return copy;
@@ -260,6 +273,7 @@ final class PooledDirectByteBuf extends PooledByteBuf<ByteBuffer> {
     @Override
     public ByteBuffer nioBuffer(int index, int length) {
         checkIndex(index, length);
+        swapInIfNeeded();
         index = idx(index);
         return (ByteBuffer) memory.duplicate().position(index).limit(index + length);
     }

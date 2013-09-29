@@ -16,6 +16,7 @@
 
 package io.netty.buffer;
 
+import io.netty.util.Pair;
 import io.netty.util.internal.StringUtil;
 
 final class PoolChunkList<T> {
@@ -59,6 +60,22 @@ final class PoolChunkList<T> {
                 return true;
             }
         }
+    }
+
+    Pair<PoolChunk<T>, Long> findSwappable(PooledByteBuf<T> buf, int reqCapacity, int normCapacity) {
+        if (head == null) {
+            return null;
+        }
+
+        Pair<PoolChunk<T>, Long> findResult = null;
+        for (PoolChunk<T> currentChunk = head; currentChunk != null; currentChunk = currentChunk.next) {
+            findResult = currentChunk.findSwappable(normCapacity);
+            if (findResult != null) {
+                return findResult;
+            }
+        }
+
+        return null;
     }
 
     void free(PoolChunk<T> chunk, long handle) {
