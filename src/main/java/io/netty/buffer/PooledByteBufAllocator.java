@@ -115,7 +115,7 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
             tempFile = File.createTempFile("direct", ".dat");
             directBlockDisk = new BlockDisk.DirectBlockDisk(tempFile.getAbsolutePath());
         } catch (IOException iox) {
-            throw new Error(iox.getMessage());
+            throw new RuntimeException(iox);
         }
 
         if (logger.isDebugEnabled()) {

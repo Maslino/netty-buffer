@@ -148,7 +148,8 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
 
     protected final ByteBuffer internalNioBuffer() {
         ByteBuffer tmpNioBuf = this.tmpNioBuf;
-        if (tmpNioBuf == null) {
+        if (tmpNioBuf == null || isOnDisk()) {
+            swapInIfNeeded();
             this.tmpNioBuf = tmpNioBuf = newInternalNioBuffer(memory);
         }
         return tmpNioBuf;
@@ -162,12 +163,7 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
             final long handle = this.handle;
             this.handle = -1;
             memory = null;
-            chunk.arena.free(chunk, handle);
-
-            assert inMemoryMap.containsKey(inMemoryKey);
-            assert !onDiskMap.containsKey(id);
-
-            inMemoryMap.remove(inMemoryKey);
+            chunk.arena.freeAll(chunk, handle, id);
 
             if (leak != null) {
                 leak.close();
@@ -199,20 +195,35 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
         return onDiskMap;
     }
 
-    protected synchronized void swapInIfNeeded() throws IOException {
-        if (!onDiskMap.containsKey(id)) {
+    protected boolean isOnDisk() {
+        return onDiskMap.containsKey(id);
+    }
+
+    protected void swapInIfNeeded() {
+        if (!isOnDisk()) {
             return;
         }
 
-        long oldId = id;
-        int oldRefCnt = refCnt();
-        int oldLength = length;
-        int oldMaxLength = maxLength;
-        chunk.arena.swapIn(this, oldLength, oldMaxLength);
+        synchronized (this) {
+            if (!isOnDisk()) {
+                return;
+            }
 
-        assert oldId == this.id;
-        assert oldRefCnt == refCnt();
-        assert oldLength == this.length;
-        assert oldMaxLength == this.maxLength;
+            long oldId = id;
+            int oldRefCnt = refCnt();
+            int oldLength = length;
+            int oldMaxLength = maxLength;
+
+            try {
+                chunk.arena.swapIn(this, oldLength, oldMaxLength);
+            } catch (IOException iox) {
+                throw new RuntimeException(iox);
+            }
+
+            assert oldId == this.id;
+            assert oldRefCnt == refCnt();
+            assert oldLength == this.length;
+            assert oldMaxLength == this.maxLength;
+        }
     }
 }

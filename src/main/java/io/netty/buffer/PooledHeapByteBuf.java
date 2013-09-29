@@ -52,17 +52,20 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
 
     @Override
     protected byte _getByte(int index) {
+        swapInIfNeeded();
         return memory[idx(index)];
     }
 
     @Override
     protected short _getShort(int index) {
+        swapInIfNeeded();
         index = idx(index);
         return (short) (memory[index] << 8 | memory[index + 1] & 0xFF);
     }
 
     @Override
     protected int _getUnsignedMedium(int index) {
+        swapInIfNeeded();
         index = idx(index);
         return (memory[index]     & 0xff) << 16 |
                (memory[index + 1] & 0xff) <<  8 |
@@ -71,6 +74,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
 
     @Override
     protected int _getInt(int index) {
+        swapInIfNeeded();
         index = idx(index);
         return (memory[index]     & 0xff) << 24 |
                (memory[index + 1] & 0xff) << 16 |
@@ -80,6 +84,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
 
     @Override
     protected long _getLong(int index) {
+        swapInIfNeeded();
         index = idx(index);
         return ((long) memory[index]     & 0xff) << 56 |
                ((long) memory[index + 1] & 0xff) << 48 |
@@ -94,6 +99,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
     @Override
     public ByteBuf getBytes(int index, ByteBuf dst, int dstIndex, int length) {
         checkDstIndex(index, length, dstIndex, dst.capacity());
+        swapInIfNeeded();
         if (dst.hasMemoryAddress()) {
             PlatformDependent.copyMemory(memory, idx(index), dst.memoryAddress() + dstIndex, length);
         } else if (dst.hasArray()) {
@@ -107,6 +113,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
     @Override
     public ByteBuf getBytes(int index, byte[] dst, int dstIndex, int length) {
         checkDstIndex(index, length, dstIndex, dst.length);
+        swapInIfNeeded();
         System.arraycopy(memory, idx(index), dst, dstIndex, length);
         return this;
     }
@@ -114,6 +121,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
     @Override
     public ByteBuf getBytes(int index, ByteBuffer dst) {
         checkIndex(index);
+        swapInIfNeeded();
         dst.put(memory, idx(index), Math.min(capacity() - index, dst.remaining()));
         return this;
     }
@@ -121,6 +129,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
     @Override
     public ByteBuf getBytes(int index, OutputStream out, int length) throws IOException {
         checkIndex(index, length);
+        swapInIfNeeded();
         out.write(memory, idx(index), length);
         return this;
     }
@@ -134,11 +143,13 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
 
     @Override
     protected void _setByte(int index, int value) {
+        swapInIfNeeded();
         memory[idx(index)] = (byte) value;
     }
 
     @Override
     protected void _setShort(int index, int value) {
+        swapInIfNeeded();
         index = idx(index);
         memory[index]     = (byte) (value >>> 8);
         memory[index + 1] = (byte) value;
@@ -146,6 +157,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
 
     @Override
     protected void _setMedium(int index, int   value) {
+        swapInIfNeeded();
         index = idx(index);
         memory[index]     = (byte) (value >>> 16);
         memory[index + 1] = (byte) (value >>> 8);
@@ -154,6 +166,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
 
     @Override
     protected void _setInt(int index, int   value) {
+        swapInIfNeeded();
         index = idx(index);
         memory[index]     = (byte) (value >>> 24);
         memory[index + 1] = (byte) (value >>> 16);
@@ -163,6 +176,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
 
     @Override
     protected void _setLong(int index, long  value) {
+        swapInIfNeeded();
         index = idx(index);
         memory[index]     = (byte) (value >>> 56);
         memory[index + 1] = (byte) (value >>> 48);
@@ -177,6 +191,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
     @Override
     public ByteBuf setBytes(int index, ByteBuf src, int srcIndex, int length) {
         checkSrcIndex(index, length, srcIndex, src.capacity());
+        swapInIfNeeded();
         if (src.hasMemoryAddress()) {
             PlatformDependent.copyMemory(src.memoryAddress() + srcIndex, memory, idx(index), length);
         } else if (src.hasArray()) {
@@ -190,6 +205,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
     @Override
     public ByteBuf setBytes(int index, byte[] src, int srcIndex, int length) {
         checkSrcIndex(index, length, srcIndex, src.length);
+        swapInIfNeeded();
         System.arraycopy(src, srcIndex, memory, idx(index), length);
         return this;
     }
@@ -198,6 +214,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
     public ByteBuf setBytes(int index, ByteBuffer src) {
         int length = src.remaining();
         checkIndex(index, length);
+        swapInIfNeeded();
         src.get(memory, idx(index), length);
         return this;
     }
@@ -205,6 +222,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
     @Override
     public int setBytes(int index, InputStream in, int length) throws IOException {
         checkIndex(index, length);
+        swapInIfNeeded();
         return in.read(memory, idx(index), length);
     }
 
@@ -222,6 +240,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
     @Override
     public ByteBuf copy(int index, int length) {
         checkIndex(index, length);
+        swapInIfNeeded();
         ByteBuf copy = alloc().heapBuffer(length, maxCapacity());
         copy.writeBytes(memory, idx(index), length);
         return copy;
@@ -240,6 +259,7 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
     @Override
     public ByteBuffer nioBuffer(int index, int length) {
         checkIndex(index, length);
+        swapInIfNeeded();
         index = idx(index);
         return (ByteBuffer) ByteBuffer.wrap(memory).position(index).limit(index + length);
     }
@@ -258,11 +278,13 @@ final class PooledHeapByteBuf extends PooledByteBuf<byte[]> {
 
     @Override
     public byte[] array() {
+        swapInIfNeeded();
         return memory;
     }
 
     @Override
     public int arrayOffset() {
+        swapInIfNeeded();
         return offset;
     }
 

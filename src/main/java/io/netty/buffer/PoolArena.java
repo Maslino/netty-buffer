@@ -161,7 +161,7 @@ abstract class PoolArena<T> {
                     return;
                 }
             } catch (IOException iox) {
-                //todo: do what?
+                //ignore: this will result in allocation in a new chunk
             }
         }
 
@@ -293,6 +293,24 @@ abstract class PoolArena<T> {
             destroyChunk(chunk);
         } else {
             chunk.parent.free(chunk, handle);
+        }
+    }
+
+    synchronized void freeAll(PoolChunk<T> chunk, long handle, long bufId) {
+        free(chunk, handle);
+
+        // free disk blocks
+        ConcurrentHashMapV8<Pair<Long, Long>, Long> inMemoryMap = PooledByteBuf.getInMemoryMap();
+        ConcurrentHashMapV8<Long, int[]> onDiskMap = PooledByteBuf.getOnDiskMap();
+        Pair<Long, Long> inMemoryKey = new Pair<Long, Long>(chunk.getId(), handle);
+        if (inMemoryMap.containsKey(inMemoryKey)) {
+            assert !onDiskMap.containsKey(inMemoryMap.get(inMemoryKey));
+            assert inMemoryMap.get(inMemoryKey) == bufId;
+            inMemoryMap.remove(inMemoryKey);
+        } else {
+            assert onDiskMap.containsKey(bufId);
+            getBlockDisk().freeBlocks(onDiskMap.get(bufId));
+            onDiskMap.remove(bufId);
         }
     }
 
