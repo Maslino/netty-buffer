@@ -53,6 +53,11 @@ public abstract class AbstractByteBuf extends ByteBuf {
     }
 
     @Override
+    public long getId() {
+        throw new UnsupportedOperationException("not implemented");
+    }
+
+    @Override
     public int maxCapacity() {
         return maxCapacity;
     }

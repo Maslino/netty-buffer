@@ -154,7 +154,7 @@ abstract class PoolArena<T> {
         }
 
         System.out.println("current memory occupation: " + getMemoryOccupationInMB());
-        if (getMemoryOccupationInMB() > PooledByteBufAllocator.getDefaultMaxMemoryMB()) {
+        if (getMemoryOccupationInMB() >= PooledByteBufAllocator.getDefaultMaxMemoryMB()) {
             try {
                 System.out.println("time to swap!");
                 if (swapOut(buf, reqCapacity, normCapacity)) {
@@ -174,7 +174,7 @@ abstract class PoolArena<T> {
     }
 
     synchronized boolean swapOut(PooledByteBuf<T> buf, int reqCapacity, int normCapacity) throws IOException {
-        System.out.println("find swappable run...");
+        System.out.println("finding swappable run...");
 
         Pair<PoolChunk<T>, Long> found = q100.findSwappable(buf, reqCapacity, normCapacity);
         if (found != null) {
@@ -245,20 +245,13 @@ abstract class PoolArena<T> {
         ConcurrentHashMapV8<Pair<Long, Long>, Long> inMemoryMap = PooledByteBuf.getInMemoryMap();
         ConcurrentHashMapV8<Long, int[]> onDiskMap = PooledByteBuf.getOnDiskMap();
 
-        System.out.println("update global in-memory map and on-disk map...");
-        System.out.println("before update, in-memory map size: " + inMemoryMap.size() +
-            ", on-disk map size: " + onDiskMap.size());
-
         Pair<Long, Long> swapOutByteBufInMemoryKey = new Pair<Long, Long>(chunk.getId(), handle);
 
         assert inMemoryMap.containsKey(swapOutByteBufInMemoryKey);
         assert !onDiskMap.containsKey(inMemoryMap.get(swapOutByteBufInMemoryKey));
+        assert inMemoryMap.get(swapOutByteBufInMemoryKey) != buf.id;
 
         onDiskMap.put(inMemoryMap.get(swapOutByteBufInMemoryKey), blocks);
-        inMemoryMap.remove(swapOutByteBufInMemoryKey);
-
-        System.out.println("after update, in-memory map size: " + inMemoryMap.size() +
-            ", on-disk map size: " + onDiskMap.size());
 
         // free to memory pool
         free(chunk, handle);
@@ -289,6 +282,12 @@ abstract class PoolArena<T> {
     }
 
     synchronized void free(PoolChunk<T> chunk, long handle) {
+        ConcurrentHashMapV8<Pair<Long, Long>, Long> inMemoryMap = PooledByteBuf.getInMemoryMap();
+        Pair<Long, Long> inMemoryKey = new Pair<Long, Long>(chunk.getId(), handle);
+        assert inMemoryMap.containsKey(inMemoryKey);
+
+        inMemoryMap.remove(inMemoryKey);
+
         if (chunk.unpooled) {
             destroyChunk(chunk);
         } else {
@@ -301,17 +300,19 @@ abstract class PoolArena<T> {
         ConcurrentHashMapV8<Long, int[]> onDiskMap = PooledByteBuf.getOnDiskMap();
 
         Pair<Long, Long> inMemoryKey = new Pair<Long, Long>(chunk.getId(), handle);
-        if (inMemoryMap.containsKey(inMemoryKey)) {
-            assert !onDiskMap.containsKey(inMemoryMap.get(inMemoryKey));
-            assert inMemoryMap.get(inMemoryKey) == bufId;
-            // free memory
-            free(chunk, handle);
-            inMemoryMap.remove(inMemoryKey);
-        } else {
-            assert onDiskMap.containsKey(bufId);
+        // PooledByteBuf要么in-memory，要么on-disk
+        if (onDiskMap.containsKey(bufId)) {
+            if (inMemoryMap.containsKey(inMemoryKey)) {
+                assert inMemoryMap.get(inMemoryKey) != bufId;
+            }
             // free disk blocks
             getBlockDisk().freeBlocks(onDiskMap.get(bufId));
             onDiskMap.remove(bufId);
+        } else {
+            assert inMemoryMap.containsKey(inMemoryKey);
+            assert inMemoryMap.get(inMemoryKey) == bufId;
+            // free to memory pool
+            free(chunk, handle);
         }
     }
 

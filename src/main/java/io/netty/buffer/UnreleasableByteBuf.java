@@ -43,6 +43,11 @@ final class UnreleasableByteBuf extends ByteBuf {
     }
 
     @Override
+    public long getId() {
+        throw new UnsupportedOperationException("not implemented");
+    }
+
+    @Override
     public boolean hasMemoryAddress() {
         return buf.hasMemoryAddress();
     }

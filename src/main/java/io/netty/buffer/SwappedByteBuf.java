@@ -45,6 +45,11 @@ public final class SwappedByteBuf extends ByteBuf {
     }
 
     @Override
+    public long getId() {
+        throw new UnsupportedOperationException("not implemented");
+    }
+
+    @Override
     public ByteOrder order() {
         return order;
     }

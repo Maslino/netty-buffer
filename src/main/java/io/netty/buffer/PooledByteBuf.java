@@ -29,8 +29,10 @@ import java.util.concurrent.atomic.AtomicLong;
 abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
 
     private static final AtomicLong nextId = new AtomicLong(1);
+    // (chunkID, handle) -> PooledByteBufID
     private static final ConcurrentHashMapV8<Pair<Long, Long>, Long> inMemoryMap =
         new ConcurrentHashMapV8<Pair<Long, Long>, Long>();
+    // PooledByteBufID -> disk blocks
     private static final ConcurrentHashMapV8<Long, int[]> onDiskMap =
         new ConcurrentHashMapV8<Long, int[]>();
 
@@ -88,6 +90,11 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
     }
 
     @Override
+    public long getId() {
+        return id;
+    }
+
+    @Override
     public final int capacity() {
         return length;
     }
@@ -127,6 +134,7 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
         }
 
         // Reallocation required.
+        swapInIfNeeded();
         chunk.arena.reallocate(this, newCapacity, true);
         return this;
     }

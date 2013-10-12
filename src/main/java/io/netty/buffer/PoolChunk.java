@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 final class PoolChunk<T> {
 
-    private static final int SWAP_UPPER_LIMIT = 8 << 20;
+    private static final int SWAP_UPPER_LIMIT = 4 << 20;    //4MB
 
     // chunk status
     private static final int ST_UNUSED = 0;
@@ -125,22 +125,25 @@ final class PoolChunk<T> {
         return 100 - freePercentage;
     }
 
-    Pair<PoolChunk<T>, Long> findSwappable(int normCapacity) {
+    Pair<PoolChunk<T>, Long> findSwappable(PooledByteBuf<T> buf, int normCapacity) {
         ConcurrentHashMapV8<Pair<Long, Long>, Long> inMemoryMap = PooledByteBuf.getInMemoryMap();
         ConcurrentHashMapV8<Long, int[]> onDiskMap = PooledByteBuf.getOnDiskMap();
 
         final int upperLimit = Math.min(chunkSize, SWAP_UPPER_LIMIT);
         // do not swap sub-page
-        final int lowerLimit = Math.max(normCapacity, pageSize);
+        final int lowerLimit = Math.max(normCapacity, pageSize << 1);
+        if (lowerLimit > upperLimit) {
+            return null;
+        }
 
         for (int curIdx = 1; curIdx < memoryMap.length; ++curIdx) {
             int val = memoryMap[curIdx];
             int length = runLength(val);
 
-            // length should be in range (lowerLimit, upperLimit), exclusive
-            if (length >= upperLimit) {
+            // length should be in range [lowerLimit, upperLimit]
+            if (length > upperLimit) {
                 continue;
-            } else if (length <= lowerLimit) {
+            } else if (length < lowerLimit) {
                 break;
             }
 
@@ -149,14 +152,15 @@ final class PoolChunk<T> {
 
                 assert inMemoryMap.containsKey(inMemoryKey);
                 assert !onDiskMap.containsKey(inMemoryMap.get(inMemoryKey));
+                assert inMemoryMap.get(inMemoryKey) != buf.id;
 
-                System.out.println("chunk: " + id + ", found handle: " + curIdx);
+                System.out.println("found: (" + id + ", " + curIdx + ")");
 
                 return new Pair<PoolChunk<T>, Long>(this, (long)curIdx);
             }
         }
 
-        System.out.println("chunk: " + id + ", not found");
+//        System.out.println("chunk: " + id + ", not found");
 
         return null;
     }
@@ -420,25 +424,4 @@ final class PoolChunk<T> {
         return buf.toString();
     }
 
-//    void doSwapOut(long handle) throws IOException {
-//        int val = memoryMap[(int)handle];
-//        byte[] bytes = new byte[runLength(val)];
-//        // todo: support ByteBuffer
-//        if (memory instanceof byte[]) {
-//            System.arraycopy((byte[])memory, runOffset(val), bytes, 0, runLength(val));
-//        }
-//
-//        // todo: write 16MB is too slow; benchmark blockdisk write
-//        BlockDisk blockDisk = PooledByteBufAllocator.getBlockDisk();
-//        int[] blocks = blockDisk.write(bytes);
-//        ConcurrentHashMapV8<Pair<Long, Long>, Long> inMemoryMap = PooledByteBuf.getInMemoryMap();
-//        ConcurrentHashMapV8<Long, int[]> onDiskMap = PooledByteBuf.getOnDiskMap();
-//
-//        Pair<Long, Long> inMemoryKey = new Pair<Long, Long>(id, handle);
-//        assert inMemoryMap.containsKey(inMemoryKey);
-//        assert !onDiskMap.containsKey(inMemoryMap.get(inMemoryKey));
-//
-//        onDiskMap.put(inMemoryMap.get(inMemoryKey), blocks);
-//        inMemoryMap.remove(inMemoryKey);
-//    }
 }

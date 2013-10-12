@@ -69,7 +69,7 @@ final class PoolChunkList<T> {
 
         Pair<PoolChunk<T>, Long> findResult = null;
         for (PoolChunk<T> currentChunk = head; currentChunk != null; currentChunk = currentChunk.next) {
-            findResult = currentChunk.findSwappable(normCapacity);
+            findResult = currentChunk.findSwappable(buf, normCapacity);
             if (findResult != null) {
                 return findResult;
             }

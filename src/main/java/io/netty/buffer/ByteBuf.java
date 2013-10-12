@@ -230,6 +230,11 @@ import java.nio.charset.UnsupportedCharsetException;
 public abstract class ByteBuf implements ReferenceCounted, Comparable<ByteBuf> {
 
     /**
+     * Returns the serial number of this buffer.
+     */
+    public abstract long getId();
+
+    /**
      * Returns the number of bytes (octets) this buffer can contain.
      */
     public abstract int capacity();

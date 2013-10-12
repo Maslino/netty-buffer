@@ -111,13 +111,18 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         DEFAULT_MAX_MEMORY_MB = defaultMaxMemory;
 
         try {
-            String swapDir = allocatorProperties.getProperty("swapDir");
-            if (swapDir == null) {
+            String swapDirStr = allocatorProperties.getProperty("swapDir");
+            if (swapDirStr == null) {
                 throw new RuntimeException("swapDir not configured.");
             }
 
-            heapBlockDisk = new BlockDisk.HeapBlockDisk(swapDir + File.separator + "heap.dat");
-            directBlockDisk = new BlockDisk.DirectBlockDisk(swapDir + File.separator + "direct.dat");
+            File swapDir = new File(swapDirStr);
+            if (!(swapDir.exists() && swapDir.isDirectory())) {
+                throw new RuntimeException("swapDir(" + swapDirStr + ") not exists or not a directory.");
+            }
+
+            heapBlockDisk = new BlockDisk.HeapBlockDisk(swapDirStr + File.separator + "heap.dat");
+            directBlockDisk = new BlockDisk.DirectBlockDisk(swapDirStr + File.separator + "direct.dat");
         } catch (IOException iox) {
             throw new RuntimeException(iox);
         }

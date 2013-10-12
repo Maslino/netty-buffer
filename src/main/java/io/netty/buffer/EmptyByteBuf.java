@@ -68,6 +68,11 @@ public final class EmptyByteBuf extends ByteBuf {
     }
 
     @Override
+    public long getId() {
+        throw new UnsupportedOperationException("not implemented");
+    }
+
+    @Override
     public int capacity() {
         return 0;
     }
