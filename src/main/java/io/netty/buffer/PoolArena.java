@@ -297,18 +297,19 @@ abstract class PoolArena<T> {
     }
 
     synchronized void freeAll(PoolChunk<T> chunk, long handle, long bufId) {
-        free(chunk, handle);
-
-        // free disk blocks
         ConcurrentHashMapV8<Pair<Long, Long>, Long> inMemoryMap = PooledByteBuf.getInMemoryMap();
         ConcurrentHashMapV8<Long, int[]> onDiskMap = PooledByteBuf.getOnDiskMap();
+
         Pair<Long, Long> inMemoryKey = new Pair<Long, Long>(chunk.getId(), handle);
         if (inMemoryMap.containsKey(inMemoryKey)) {
             assert !onDiskMap.containsKey(inMemoryMap.get(inMemoryKey));
             assert inMemoryMap.get(inMemoryKey) == bufId;
+            // free memory
+            free(chunk, handle);
             inMemoryMap.remove(inMemoryKey);
         } else {
             assert onDiskMap.containsKey(bufId);
+            // free disk blocks
             getBlockDisk().freeBlocks(onDiskMap.get(bufId));
             onDiskMap.remove(bufId);
         }

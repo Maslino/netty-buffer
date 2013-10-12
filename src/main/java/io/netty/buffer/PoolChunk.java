@@ -22,6 +22,9 @@ import io.netty.util.internal.chmv8.ConcurrentHashMapV8;
 import java.util.concurrent.atomic.AtomicLong;
 
 final class PoolChunk<T> {
+
+    private static final int SWAP_UPPER_LIMIT = 8 << 20;
+
     // chunk status
     private static final int ST_UNUSED = 0;
     private static final int ST_BRANCH = 1;
@@ -34,7 +37,7 @@ final class PoolChunk<T> {
     private static final long addend = 0xBL;
     private static final long mask = (1L << 48) - 1;
 
-    private static final AtomicLong nextChunkId = new AtomicLong(0);
+    private static final AtomicLong nextChunkId = new AtomicLong(1);
     private final long id;
 
     final PoolArena<T> arena;
@@ -126,14 +129,15 @@ final class PoolChunk<T> {
         ConcurrentHashMapV8<Pair<Long, Long>, Long> inMemoryMap = PooledByteBuf.getInMemoryMap();
         ConcurrentHashMapV8<Long, int[]> onDiskMap = PooledByteBuf.getOnDiskMap();
 
-        final int upperLimit = chunkSize;
+        final int upperLimit = Math.min(chunkSize, SWAP_UPPER_LIMIT);
         // do not swap sub-page
-        final int lowerLimit = normCapacity > pageSize ? normCapacity : pageSize;
+        final int lowerLimit = Math.max(normCapacity, pageSize);
 
         for (int curIdx = 1; curIdx < memoryMap.length; ++curIdx) {
             int val = memoryMap[curIdx];
             int length = runLength(val);
 
+            // length should be in range (lowerLimit, upperLimit), exclusive
             if (length >= upperLimit) {
                 continue;
             } else if (length <= lowerLimit) {

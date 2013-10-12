@@ -54,6 +54,7 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
             allocatorProperties.load(in);
         } catch (IOException ex) {
             logger.warn("allocator.properties file not found.");
+            throw new RuntimeException("allocator.properties file not found.", ex);
         }
 
         System.out.println(allocatorProperties);
@@ -110,10 +111,13 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         DEFAULT_MAX_MEMORY_MB = defaultMaxMemory;
 
         try {
-            File tempFile = File.createTempFile("heap", ".dat");
-            heapBlockDisk = new BlockDisk.HeapBlockDisk(tempFile.getAbsolutePath());
-            tempFile = File.createTempFile("direct", ".dat");
-            directBlockDisk = new BlockDisk.DirectBlockDisk(tempFile.getAbsolutePath());
+            String swapDir = allocatorProperties.getProperty("swapDir");
+            if (swapDir == null) {
+                throw new RuntimeException("swapDir not configured.");
+            }
+
+            heapBlockDisk = new BlockDisk.HeapBlockDisk(swapDir + File.separator + "heap.dat");
+            directBlockDisk = new BlockDisk.DirectBlockDisk(swapDir + File.separator + "direct.dat");
         } catch (IOException iox) {
             throw new RuntimeException(iox);
         }

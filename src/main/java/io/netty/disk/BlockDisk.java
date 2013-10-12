@@ -38,15 +38,16 @@ public abstract class BlockDisk<T> {
     /** File channel for multiple concurrent reads and writes */
     protected final FileChannel fileChannel;
 
-    protected BlockDisk(String filepath) throws FileNotFoundException {
+    protected BlockDisk(String filepath) throws IOException {
         this(filepath, DEFAULT_BLOCK_SIZE_BYTES);
     }
 
-    protected BlockDisk(String filepath, short blockSizeBytes) throws FileNotFoundException {
+    protected BlockDisk(String filepath, short blockSizeBytes) throws IOException {
         validateBlockSize(blockSizeBytes);
         this.filepath = filepath;
         RandomAccessFile raf = new RandomAccessFile(filepath, "rw");
         this.fileChannel = raf.getChannel();
+        this.fileChannel.truncate(0);
         this.blockSizeBytes = blockSizeBytes;
     }
 
@@ -153,11 +154,11 @@ public abstract class BlockDisk<T> {
 
     public static final class HeapBlockDisk extends BlockDisk<byte[]> {
 
-        public HeapBlockDisk(String filepath) throws FileNotFoundException {
+        public HeapBlockDisk(String filepath) throws IOException {
             super(filepath);
         }
 
-        public HeapBlockDisk(String filepath, short blockSizeBytes) throws FileNotFoundException {
+        public HeapBlockDisk(String filepath, short blockSizeBytes) throws IOException {
             super(filepath, blockSizeBytes);
         }
 
@@ -220,11 +221,11 @@ public abstract class BlockDisk<T> {
 
     public static final class DirectBlockDisk extends BlockDisk<ByteBuffer> {
 
-        public DirectBlockDisk(String filepath) throws FileNotFoundException {
+        public DirectBlockDisk(String filepath) throws IOException {
             super(filepath);
         }
 
-        public DirectBlockDisk(String filepath, short blockSizeBytes) throws FileNotFoundException {
+        public DirectBlockDisk(String filepath, short blockSizeBytes) throws IOException {
             super(filepath, blockSizeBytes);
         }
 

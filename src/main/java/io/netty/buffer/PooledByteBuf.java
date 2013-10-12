@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
 
-    private static final AtomicLong nextId = new AtomicLong(0);
+    private static final AtomicLong nextId = new AtomicLong(1);
     private static final ConcurrentHashMapV8<Pair<Long, Long>, Long> inMemoryMap =
         new ConcurrentHashMapV8<Pair<Long, Long>, Long>();
     private static final ConcurrentHashMapV8<Long, int[]> onDiskMap =
